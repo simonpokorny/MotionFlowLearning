@@ -1,0 +1,8 @@
+lightning_logs
+.idea
+venv
+wandb
+checkpoints
+data/waymo_dataset
+*.pyc
+.DC_Store
