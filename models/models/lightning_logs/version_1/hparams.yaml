@@ -1,0 +1,8 @@
+adam_beta_1: 0.9
+adam_beta_2: 0.999
+background_weight: 0.1
+learning_rate: 1.0e-06
+n_pillars_x: 640
+n_pillars_y: 640
+point_features: 8
+use_group_norm: false
