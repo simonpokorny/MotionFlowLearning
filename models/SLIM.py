@@ -2,13 +2,13 @@ import numpy as np
 import pytorch_lightning as pl
 import torch
 import yaml
-
 from pytorch3d.ops.knn import knn_points
-from models.utils import init_weights
+
 from models.networks import PillarFeatureNetScatter, PointFeatureNet, MovingAverageThreshold, RAFT
 from models.networks.slimdecoder import OutputDecoder
+from models.utils import init_weights
+from visualization.plot import plot_2d_point_cloud, plot_tensor, visualise_tensor
 
-from visualization.plot import plot_pillars, plot_pillars_heatmap, plot_2d_point_cloud, plot_tensor, visualise_tensor
 VISUALIZATION = False
 
 
@@ -153,11 +153,10 @@ class SLIM(pl.LightningModule):
         # Check VISUALIZATION
         if VISUALIZATION:
             plot_2d_point_cloud(current_batch_pc[0])
-            #plot_pillars(current_voxel_coordinates[0], 35, -35, 35, -35., 0.109375)
+            # plot_pillars(current_voxel_coordinates[0], 35, -35, 35, -35., 0.109375)
             plot_tensor(current_batch_pillar_mask[0][0])
             visualise_tensor(current_batch_pillar_mask)
-            #import matplotlib.pyplot as plt
-
+            # import matplotlib.pyplot as plt
 
         # 2. RAFT Encoder with motion flow backbone
         # Output for forward pass and backward pass
@@ -172,7 +171,6 @@ class SLIM(pl.LightningModule):
 
         predictions_fw = []
         predictions_bw = []
-
 
         for it, (raft_output_0_1, raft_output_1_0) in enumerate(zip(outputs_fw, outputs_bw)):
             prediction_fw = self._decoder_fw(
@@ -225,34 +223,35 @@ class SLIM(pl.LightningModule):
         self.lr = 0.0001
         optimizer = torch.optim.RMSprop(self.parameters(), lr=self.lr)
 
-
         decay_ratio = 0.5
-        decay = lambda step : decay_ratio ** int(step / 6000)
+        decay = lambda step: decay_ratio ** int(step / 6000)
         scheduler_decay = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=[decay])
         scheduler_decay = {'scheduler': scheduler_decay,
-                     'interval': 'step',  # or 'epoch'
-                     'frequency': 1}
+                           'interval': 'step',  # or 'epoch'
+                           'frequency': 1}
 
-        warm_up = lambda step : 0.01 ** (step / 2000) if(step < 2000) else 1
+        warm_up = lambda step: 0.01 ** (step / 2000) if (step < 2000) else 1
         scheduler_warm_up = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=[warm_up])
         scheduler_warm_up = {'scheduler': scheduler_warm_up,
-                     'interval': 'step',  # or 'epoch'
-                     'frequency': 1}
+                             'interval': 'step',  # or 'epoch'
+                             'frequency': 1}
 
         return [optimizer], [scheduler_decay, scheduler_warm_up]
 
-
     def log_metrics(self, loss, metrics, phase):
         # phase should be training, validation or test
-        metrics_dict = {}
-        for metric in metrics:
-            for state in metrics[metric]:
-                for label in metrics[metric][state]:
-                    metrics_dict[f'{phase}/{metric}/{state}/{label}'] = metrics[metric][state][label]
+
+        if phase != "train":
+            raise NotImplementedError()
+            metrics_dict = {}
+            for metric in metrics:
+                for state in metrics[metric]:
+                    for label in metrics[metric][state]:
+                        metrics_dict[f'{phase}/{metric}/{state}/{label}'] = metrics[metric][state][label]
 
         # Do not log the in depth metrics in the progress bar
-        self.log(f'{phase}/loss', loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
-        self.log_dict(metrics_dict, on_step=True, on_epoch=True, prog_bar=False, logger=True)
+        #self.log(f'{phase}/loss', loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+            self.log_dict(metrics_dict, on_step=True, on_epoch=True, prog_bar=False, logger=True)
 
     def training_step(self, batch, batch_idx):
         """
@@ -316,7 +315,6 @@ class SLIM(pl.LightningModule):
         current_frame_masks = x[1][2]
         # Remove all points that are padded
 
-
         # dim 0 - forward and backward flow
         # dim 1 - outputs based on raft iteration (len == nbr of iter)
         # dim 2 - pointwise outputs, static aggr, dynamic threshold, bev outputs
@@ -331,8 +329,8 @@ class SLIM(pl.LightningModule):
         # NN
         # forward
         # .cuda() should be optimized
-        p_i = x[0][0][..., :3].float() # pillared - should be probably returned to previous form
-        #p_i = p_i[..., :3] + p_i[..., 3:6]# previous form
+        p_i = x[0][0][..., :3].float()  # pillared - should be probably returned to previous form
+        # p_i = p_i[..., :3] + p_i[..., 3:6]# previous form
         p_j = x[1][0][..., :3].float()
         # p_j = p_j[..., :3] + p_j[..., 3:6]# previous form
 
@@ -368,7 +366,8 @@ class SLIM(pl.LightningModule):
             :return:
             '''
             BS = len(pts)
-            bs_ind = torch.cat([bs_idx * torch.ones(pts.shape[1], dtype=torch.long, device=pts.device) for bs_idx in range(BS)])
+            bs_ind = torch.cat(
+                [bs_idx * torch.ones(pts.shape[1], dtype=torch.long, device=pts.device) for bs_idx in range(BS)])
 
             feature_grid = - torch.ones(BS, grid_size, grid_size, device=pts.device).long()
 
@@ -379,10 +378,10 @@ class SLIM(pl.LightningModule):
             feature_ind = ((pts[:, :, :2] - coor_shift) / cell_size).long()
 
             # breakpoint()
-            feature_grid[bs_ind, feature_ind.flatten(0, 1)[:, 0], feature_ind.flatten(0, 1)[:, 1]] = feature.flatten().long()
+            feature_grid[
+                bs_ind, feature_ind.flatten(0, 1)[:, 0], feature_ind.flatten(0, 1)[:, 1]] = feature.flatten().long()
 
             return feature_grid
-
 
         dynamic_states = (fw_raw_flow_nn.dists[..., 0] > fw_rigid_flow_nn.dists[..., 0]) + 1
         art_label_grid = construct_batched_cuda_grid(p_i, dynamic_states, x_min=-35, y_min=-35, grid_size=640)
@@ -397,12 +396,16 @@ class SLIM(pl.LightningModule):
         loss = 2. * nn_loss + 1. * rigic_cycle_loss + 0.1 * artificial_class_loss
         # loss.backward()   # backward probehne
 
-        print(f"NN loss: {nn_loss.item():.4f}, Rigid cycle loss: {rigic_cycle_loss.item():.4f}, Artificial label loss: {artificial_class_loss.item():.4f}")
+        print(
+            f"NN loss: {nn_loss.item():.4f}, Rigid cycle loss: {rigic_cycle_loss.item():.4f}, Artificial label loss: {artificial_class_loss.item():.4f}")
+
+        self.log(f'{mode}/loss', nn_loss.item(), on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log(f'{mode}/loss', rigic_cycle_loss.item(), on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log(f'{mode}/loss', artificial_class_loss.item(), on_step=True, on_epoch=True, prog_bar=True, logger=True)
 
         metrics = 0
         # y_hat = y_hat[current_frame_masks]
         # This will yield a (n_real_points, 3) tensor with the batch size being included already
-
 
         # The first 3 dimensions are the actual flow. The last dimension is the class id.
         # y_flow = y[:, :3]
@@ -432,6 +435,7 @@ if __name__ == "__main__":
 
     ### DATAMODULE ###
     from datasets.waymoflow.WaymoDataModule import WaymoDataModule
+
     dataset_path = "../data/waymoflow_subset"
     # dataset_path = "/Users/simonpokorny/mnt/data/waymo/raw/processed/training"
     grid_cell_size = 0.109375
@@ -448,7 +452,6 @@ if __name__ == "__main__":
                                   num_workers=0,
                                   n_pillars_x=640,
                                   n_points=None, apply_pillarization=True)
-
 
     ### TRAINER ###
     trainer = pl.Trainer(fast_dev_run=True, num_sanity_val_steps=0)  # Add Trainer hparams if desired
