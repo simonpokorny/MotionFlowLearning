@@ -223,7 +223,7 @@ class OutputDecoder(pl.LightningModule):
 
         return network_output_dict
 
-    def _create_static_flow(self, inv_odom, homog_metric_voxel_center_coords):
+    def _create_gt_static_flow(self, inv_odom, homog_metric_voxel_center_coords):
         """
         Compute other self supervise component -> gt_static_flow
         """

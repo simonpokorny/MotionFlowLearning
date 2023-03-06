@@ -224,22 +224,23 @@ class SLIM(pl.LightningModule):
         """
         self.lr = 0.0001
         optimizer = torch.optim.RMSprop(self.parameters(), lr=self.lr)
-        scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=6000, gamma=0.5)
-        return optimizer, scheduler
 
-    def optimizer_step(self, epoch, batch_idx, optimizer, optimizer_idx, optimizer_closure, on_tpu=False,
-                       using_lbfgs=False):
-        """
-        This is needed because the SLIM use learning rate warm-up
-        """
-        # update params
-        optimizer.step(closure=optimizer_closure)
 
-        # skip the first 2000 steps
-        if self.trainer.global_step < 2000:
-            lr_warn_up = self.lr * 0.1 / torch.pow(0.1, optimizer_idx/2000)
-            for pg in optimizer.param_groups:
-                pg["lr"] = lr_warn_up
+        decay_ratio = 0.5
+        decay = lambda step : decay_ratio ** int(step / 6000)
+        scheduler_decay = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=[decay])
+        scheduler_decay = {'scheduler': scheduler_decay,
+                     'interval': 'step',  # or 'epoch'
+                     'frequency': 1}
+
+        warm_up = lambda step : 0.01 ** (step / 2000) if(step < 2000) else 1
+        scheduler_warm_up = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=[warm_up])
+        scheduler_warm_up = {'scheduler': scheduler_warm_up,
+                     'interval': 'step',  # or 'epoch'
+                     'frequency': 1}
+
+        return [optimizer], [scheduler_decay, scheduler_warm_up]
+
 
     def log_metrics(self, loss, metrics, phase):
         # phase should be training, validation or test
@@ -322,23 +323,23 @@ class SLIM(pl.LightningModule):
 
         fw_pointwise = y_hat[0][-1][0]  # -1 for last raft output?
         fw_bev = y_hat[0][-1][3]
-        fw_trans = y_hat[0][-1][1].cuda()
-        bw_trans = y_hat[1][-1][1].cuda()
+        fw_trans = y_hat[0][-1][1]
+        bw_trans = y_hat[1][-1][1]
 
         # todo backward pass as well
         # todo if more samples in batch than 1, it needs to be verified
         # NN
         # forward
         # .cuda() should be optimized
-        p_i = x[0][0][..., :3].float().cuda() # pillared - should be probably returned to previous form
+        p_i = x[0][0][..., :3].float() # pillared - should be probably returned to previous form
         #p_i = p_i[..., :3] + p_i[..., 3:6]# previous form
-        p_j = x[1][0][..., :3].float().cuda()
+        p_j = x[1][0][..., :3].float()
         # p_j = p_j[..., :3] + p_j[..., 3:6]# previous form
 
         # this is ambiguous, not sure if there is difference between static_flow and dynamic_flow
         # static ---> aggregated_static?
-        raw_flow_i = fw_pointwise['dynamic_flow'].cuda()
-        rigid_flow = fw_pointwise['static_aggr_flow'].cuda()
+        raw_flow_i = fw_pointwise['dynamic_flow']
+        rigid_flow = fw_pointwise['static_aggr_flow']
 
         fw_raw_flow_nn = knn_points(p_i + raw_flow_i, p_j, lengths1=None, lengths2=None, K=1, norm=1)
         fw_rigid_flow_nn = knn_points(p_i + rigid_flow, p_j, lengths1=None, lengths2=None, K=1, norm=1)
@@ -386,7 +387,7 @@ class SLIM(pl.LightningModule):
         dynamic_states = (fw_raw_flow_nn.dists[..., 0] > fw_rigid_flow_nn.dists[..., 0]) + 1
         art_label_grid = construct_batched_cuda_grid(p_i, dynamic_states, x_min=-35, y_min=-35, grid_size=640)
 
-        p_i_grid_class = fw_bev['class_logits'].cuda()
+        p_i_grid_class = fw_bev['class_logits']
 
         # In paper, they have Sum instead of Mean, we should check original codes
         art_CE = torch.nn.CrossEntropyLoss(ignore_index=-1)
@@ -431,7 +432,7 @@ if __name__ == "__main__":
 
     ### DATAMODULE ###
     from datasets.waymoflow.WaymoDataModule import WaymoDataModule
-    dataset_path = "../../data/waymoflow_subset"
+    dataset_path = "../data/waymoflow_subset"
     # dataset_path = "/Users/simonpokorny/mnt/data/waymo/raw/processed/training"
     grid_cell_size = 0.109375
     data_module = WaymoDataModule(dataset_directory=dataset_path,
