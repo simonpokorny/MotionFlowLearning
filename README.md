@@ -1,5 +1,15 @@
 # motion-learning
 
+## Changes
+
+#### 6.3.
+- Changed the structure of the project (seems more useful and organized)
+- all hyperparameters of slim are stored in config with description 
+- pytorch3d folder was removed from repo, but added to requirements 
+- merged BaseModelSlim and Slim to one script slim.py
+- slim decoder is rewritten to more readable format 
+- added optimization and lr changes to slim based on official repo 
+- losses are also added
 
 
 ### Repo folder structure
@@ -11,8 +21,7 @@
     ├── losses                  # implemented losses 
     ├── models                  # all implemented models
     │   └── networks            # shared modules across models 
-    ├── motion_supervision      # 
-    ├── pytorch3d               # external library
+    ├── motion_supervision      #
     ├── scripts                 # all runable scripts for train, preprocessing ... 
     ├── time_space              # 
     ├── visualization           # scripts for visualization
@@ -22,4 +31,4 @@
 
 
 
-### Source files
+
