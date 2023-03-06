@@ -17,10 +17,8 @@ class RAFT(pl.LightningModule):
                  predict_weight_for_static_aggregation=True,
                  hdim=96,
                  cdim=64,
-                 feat_for_corr_dim=128,
                  flow_maps_archi="vanilla",
                  corr_module="all",
-                 predict_logits=True,
                  learn_upsampling_mask=True):
         """
          Initialize the RAFT model.
@@ -34,10 +32,8 @@ class RAFT(pl.LightningModule):
              predict_weight_for_static_aggregation (bool): whether to predict weight for static aggregation.
              hdim (int): hidden dimension in context encoder.
              cdim (int): context dimension in context encoder.
-             feat_for_corr_dim (int): dimension of features for correlation.
              flow_maps_archi (str): architecture of flow maps to use. "vanilla" / "single"
              corr_module (str): correlation module to use.
-             predict_logits (bool): whether to predict logits.
              learn_upsampling_mask (bool): whether to learn upsampling mask.
          """
         super().__init__()
@@ -51,6 +47,9 @@ class RAFT(pl.LightningModule):
         self.iters = iters
         self.flow_maps_archi = flow_maps_archi
         self.corr_module = corr_module
+
+        assert flow_maps_archi in ["single", "vanilla"]
+        predict_logits = True if flow_maps_archi == "single" else False
 
         # Encoder for correlation and input to RAFT-S
         self._features_encoder_net = ResnetEncoder(input_dim=64, output_dim=128, norm_fn='instance', dropout=0.0)
