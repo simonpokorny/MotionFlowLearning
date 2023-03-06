@@ -27,9 +27,9 @@ from argparse import ArgumentParser
 import torch
 
 from .BaseModel import BaseModel
-from ..networks.flownet3d.flowRefinement import FlowRefinementNet
-from ..networks.flownet3d.pointFeatureNet import PointFeatureNet
-from ..networks.flownet3d.pointMixture import PointMixtureNet
+from models.networks.flownet3d.flowRefinement import FlowRefinementNet
+from models.networks.flownet3d.pointFeatureNet import PointFeatureNet
+from models.networks.flownet3d.pointMixture import PointMixtureNet
 
 
 class Flow3DModel(BaseModel):
