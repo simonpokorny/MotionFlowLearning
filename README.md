@@ -12,6 +12,19 @@
 - losses are also added
 
 
+## Todo list
+
+#### without assignment 
+- [ ] Nothing yet
+#### Patrik
+- [ ] Lossy
+#### Simon
+- [x] Udělat todo list na readme :)
+- [ ] Kitti raw daataset
+- [ ] BaseDataset & Base Dataloader
+- [ ] Train on raw kitti
+
+
 ### Repo folder structure
 
     .
