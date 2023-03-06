@@ -13,18 +13,11 @@
 
 
 ## Todo list
-
 # without assignment )
-
 - [ ] 
-
-# Patrik
-
+#### Patrik
 - [ ] Lossy
-
-
-# Simon
-
+#### Simon
 - [x] Udělat todo list na readme :)
 - [ ] Kitti raw daataset
 - [ ] BaseDataset & Base Dataloader
