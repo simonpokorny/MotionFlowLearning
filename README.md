@@ -13,8 +13,9 @@
 
 
 ## Todo list
-# without assignment )
-- [ ] 
+
+#### without assignment 
+- [ ] Nothing yet
 #### Patrik
 - [ ] Lossy
 #### Simon
