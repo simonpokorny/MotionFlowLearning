@@ -1,8 +1,8 @@
 from tqdm import tqdm
 
-from datasets.argoverse.argoverse2 import Argoverse2_Sequence
-from datasets.structures.bev import BEV
-from datasets.visualizer import *
+from my_datasets.argoverse.argoverse2 import Argoverse2_Sequence
+from my_datasets.structures.bev import BEV
+from my_datasets.visualizer import *
 
 def visibility_freespace(curr_pts, pose, cfg):
     '''
@@ -223,7 +223,7 @@ def transfer_voxel_visibility(accum_freespace : np.ndarray, global_pts, cell_siz
     return static_mask
 
 if __name__ == '__main__':
-    from datasets.kitti.semantic_kitti import SemanticKitti_Sequence
+    from my_datasets.kitti.semantic_kitti import SemanticKitti_Sequence
     from motion_supervision.generate_priors import correct_the_dynamic_priors
     from motion_supervision.constants import cfg
 

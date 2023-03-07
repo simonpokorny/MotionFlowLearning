@@ -1,7 +1,7 @@
 import numpy as np
 
-from datasets.kitti.semantic_kitti import SemanticKitti_Sequence
-from datasets.visualizer import *
+from my_datasets.kitti.semantic_kitti import SemanticKitti_Sequence
+from my_datasets.visualizer import *
 
 seq = 27
 sequence = SemanticKitti_Sequence(seq)

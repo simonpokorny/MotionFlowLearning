@@ -2,7 +2,7 @@ import torch
 from tqdm import tqdm
 
 from OGC.models.segnet_kitti import MaskFormer3D
-from datasets.argoverse.argoverse2 import Argoverse2_Sequence
+from my_datasets.argoverse.argoverse2 import Argoverse2_Sequence
 
 sequence = Argoverse2_Sequence(sequence_nbr=0)
 

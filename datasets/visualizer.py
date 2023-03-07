@@ -1,6 +1,7 @@
 import os.path
 
 import numpy as np
+import torch
 import glob
 import matplotlib.pyplot as plt
 import sys
@@ -58,7 +59,10 @@ if socket.gethostname().startswith("Pat"):
         l = []
 
         for n, points in enumerate(args):
-            p.append(points[:,:3])
+            if type(points) == torch.Tensor:
+                p.append(points[:,:3].detach().cpu().numpy())
+            else:
+                p.append(points[:,:3])
             l.append(n * np.ones((points.shape[0])))
 
         p = np.concatenate(p)
@@ -89,16 +93,19 @@ if socket.gethostname().startswith("Pat"):
 
     def visualize_flow3d(pts1, pts2, frame_flow):
         # flow from multiple pcl vis
-        valid_flow = frame_flow[:, 3] == 1
-        vis_flow = frame_flow[valid_flow]
+        # valid_flow = frame_flow[:, 3] == 1
+        # vis_flow = frame_flow[valid_flow]
         # threshold for dynamic is flow larger than 0.05 m
-        dist = np.sqrt(vis_flow[:,:3] ** 2).mean(1)
-        dist_mask = dist > 0.05
-        vis_flow = vis_flow[dist_mask]
+        dist = np.sqrt((frame_flow[:,:3] ** 2).sum(1))
+        vis_flow = frame_flow
+        vis_pts = pts1[:,:3]
+        # dist_mask = dist > 0.1
+        # vis_flow = frame_flow[dist_mask]
 
+        # todo color for flow estimate
         # for raycast
-        vis_pts = pts1[valid_flow, :3]
-        vis_pts = vis_pts[dist_mask, :3]
+        # vis_pts = pts1[valid_flow, :3]
+        # vis_pts = pts1[dist_mask, :3]
 
         all_rays = []
         # breakpoint()
@@ -109,6 +116,19 @@ if socket.gethostname().startswith("Pat"):
         all_rays = np.concatenate(all_rays)
 
         visualize_multiple_pcls(*[pts1, all_rays, pts2], point_size=0.02)
+
+    def visualizer_transform(p_i, p_j, trans_mat):
+        '''
+
+        :param p_i: source
+        :param p_j: target
+        :param trans_mat: p_i ---> p_j transform matrix
+        :return:
+        '''
+
+        p_i = np.insert(p_i, obj=3, values=1, axis=1)
+        vis_p_i = p_i @ trans_mat.T
+        visualize_multiple_pcls(*[p_i, vis_p_i, p_j])
 
 else:
     def visualize_points3D(pts, color=None, path=os.path.expanduser("~") + '/data/tmp_vis/visul'):

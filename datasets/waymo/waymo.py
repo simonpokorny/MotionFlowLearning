@@ -134,5 +134,31 @@ if __name__ == '__main__':
     # todo match the segmentation labels to get rid of road below boxes?
     # todo add additional dynamic label in form of "object has moved at least once"
 
-    seq = int(sys.argv[1])
-    sequence = Waymo_Sequence(seq, init_preprocessing=True)
+    min_inten = np.inf
+    max_inten = 0
+
+    min_elon = np.inf
+    max_elon = 0
+
+    for seq in range(500):
+        sequence = Waymo_Sequence(seq, init_preprocessing=False)
+        print(seq)
+        for frame in range(len(sequence)):
+            pts = sequence.get_feature(idx=frame, name='lidar')
+            inten = pts[:, 3]
+            elon = pts[:, 4]
+
+            if np.max(inten) > max_inten:
+                max_inten = np.max(inten)
+
+            if np.min(inten) < min_inten:
+                min_inten = np.min(inten)
+
+            if np.max(elon) > max_elon:
+                max_elon = np.max(elon)
+
+            if np.min(elon) < min_elon:
+                min_elon = np.min(elon)
+
+        print("Intensity Values: ", min_inten, max_inten)
+        print("Elongation Values: ", min_elon, max_elon)

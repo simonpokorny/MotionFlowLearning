@@ -1,11 +1,11 @@
 from tqdm import tqdm
 
-from datasets.argoverse.argoverse2 import Argoverse2_Sequence
-from datasets import paths
+from my_datasets.argoverse.argoverse2 import Argoverse2_Sequence
+from my_datasets import paths
 
 from motion_supervision.transfer import Sequence_with_Object, Dynamic_Instance
 
-from datasets.visualizer import *
+from my_datasets.visualizer import *
 
 
 

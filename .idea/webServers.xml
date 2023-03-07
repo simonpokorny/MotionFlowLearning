@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="WebServers">
+    <option name="servers">
+      <webServer id="4ff1337c-321e-4e28-95ce-d1cd3c34d09f" name="rci">
+        <fileTransfer rootFolder="/home/vacekpa2" accessType="SFTP" host="login3.rci.cvut.cz" port="22" sshConfigId="bef35fff-8bd6-4106-b9bb-95774fce7d64" sshConfig="vacekpa2@login3.rci.cvut.cz:22 agent" authAgent="true">
+          <advancedOptions>
+            <advancedOptions dataProtectionLevel="Private" passiveMode="true" shareSSLContext="true" isUseRsync="true" />
+          </advancedOptions>
+        </fileTransfer>
+      </webServer>
+    </option>
+  </component>
+</project>

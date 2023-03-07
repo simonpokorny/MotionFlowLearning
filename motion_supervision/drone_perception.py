@@ -3,9 +3,9 @@ import os
 import numpy as np
 import torch
 from tqdm import tqdm
-from datasets.delft.drone import Delft_Sequence
-from datasets.visualizer import *
-from datasets.structures.rgbd import plot_realsense
+from my_datasets.delft.drone import Delft_Sequence
+from my_datasets.visualizer import *
+from my_datasets.structures.rgbd import plot_realsense
 from scipy.spatial.transform.rotation import Rotation
 
 
@@ -61,10 +61,177 @@ sequence = Delft_Sequence(0)
 # print(sequence.sequence_path)
 print(sequence.sequence_dict)
 
+import open3d as o3d
+import copy
+
+def draw_registration_result_original_color(source, target, transformation):
+    source_temp = copy.deepcopy(source)
+    source_temp.transform(transformation)
+    o3d.visualization.draw_geometries([source_temp, target],
+                                      zoom=0.5,
+                                      front=[-0.2458, -0.8088, 0.5342],
+                                      lookat=[1.7745, 2.2305, 0.9787],
+                                      up=[0.3109, -0.5878, -0.7468])
+
+
+# colored pointcloud registration
+# This is implementation of following paper
+# J. Park, Q.-Y. Zhou, V. Koltun,
+# Colored Point Cloud Registration Revisited, ICCV 2017
+
+def color_icp_registration(source, target):
+
+    voxel_radius = [1., 1., 1.]
+    max_iter = [1000, 500, 340]
+    current_transformation = np.identity(4)
+    # print("3. Colored point cloud registration")
+    for scale in range(3):
+        iter = max_iter[scale]
+        radius = voxel_radius[scale]
+        # print([iter, radius, scale])
+
+        # print("3-1. Downsample with a voxel size %.2f" % radius)
+        source_down = source.voxel_down_sample(radius)
+        target_down = target.voxel_down_sample(radius)
+
+        # print("3-2. Estimate normal.")
+        source_down.estimate_normals(
+            o3d.geometry.KDTreeSearchParamHybrid(radius=radius * 2, max_nn=30))
+        target_down.estimate_normals(
+            o3d.geometry.KDTreeSearchParamHybrid(radius=radius * 2, max_nn=30))
+
+        # print("3-3. Applying colored point cloud registration")
+        result_icp = o3d.pipelines.registration.registration_colored_icp(
+            source_down, target_down, radius, current_transformation,
+            o3d.pipelines.registration.TransformationEstimationForColoredICP(),
+            o3d.pipelines.registration.ICPConvergenceCriteria(relative_fitness=1e-6,
+                                                              relative_rmse=1e-6,
+                                                              max_iteration=iter))
+        current_transformation = result_icp.transformation
+        # print(result_icp)
+
+    return current_transformation
+
+
+
+pcd_paths = sorted(glob.glob(f'/home/patrik/patrik_data/drone/kiss_icp/*.pcd'))
+frame = 0
+
+source = o3d.io.read_point_cloud(pcd_paths[frame])
+target = o3d.io.read_point_cloud(pcd_paths[frame+1])
+
+current_transformation = color_icp_registration(source, target)
+
+# draw_registration_result_original_color(source, target,
+#                                         current_transformation)
+
+
+paths = sorted(glob.glob(f'/home/patrik/patrik_data/drone/sequences/cor1/pts/*'))
+
+for frame in range(len(paths)):
+
+    new_path = f'/home/patrik/patrik_data/drone/kiss_icp/{frame:06}.pcd'
+    np.load(paths[frame])
+    # np_pcd = sequence.get_feature(frame, 'sync_pts')
+    # pts = sequence.get_feature(frame, 'sync_pts')
+
+    pts[:, [0, 2]] = pts[:, [2, 0]]
+    pts[:, [1, 2]] = pts[:, [2, 1]]
+    pts[:, 2] = - pts[:, 2]
+    pts[:, 1] = - pts[:, 1]
+
+    # filter out longer distances
+    dist_thresh = 5
+    dist_mask = pts[:, 0] < dist_thresh
+
+    pts = pts[dist_mask]
+
+    pts[:, 3:6] /= 255  # rgb to float
+
+    np_pcd = pts
+
+    pcd = o3d.geometry.PointCloud()
+    v3d = o3d.utility.Vector3dVector
+    pcd.points = v3d(np_pcd[:,:3])
+    pcd.colors = v3d(np_pcd[:,3:])
+
+    o3d.io.write_point_cloud(new_path, pcd)
+    print(new_path)
+
+    # if frame == 200:
+    #     break
+
+from tqdm import tqdm
+for frame in tqdm(range(len(sequence))):
+
+    # local
+    source = o3d.io.read_point_cloud(pcd_paths[frame])
+    target = o3d.io.read_point_cloud(pcd_paths[frame+1])
+    threshold = 0.02
+
+    # transformation is between frames, not global. You need to multiple along the sequence
+    init_pose1 = sequence.get_feature(frame, 'sync_pose')
+    init_pose2 = sequence.get_feature(frame+1, 'sync_pose')
+
+    trans_init = np.linalg.inv(init_pose1) @ init_pose2
+    # trans_init = np.eye(4)
+    # break
+
+    # draw_registration_result(source, target, trans_init)
+
+    transform_matrix = color_icp_registration(source, target)
+
+    # print(f"Generating pose for frame {frame}")
+
+
+    sequence.store_feature(transform_matrix, frame, name='sync_open3d_icp_pose')
+
+    # multiply by sequence
+
+    if frame == 200:
+        break
+
+new_pose_list = [sequence.get_feature(i, name='sync_open3d_icp_pose') for i in range(200)]
+
+# last_res_pose = reg_p2p.transformation
+# pose = np.eye(4)
+global_pts_list = []
+pose_pts = []
+# len(new_pose_list)
+for frame in range(50,100):
+    print(frame)
+    pts = sequence.get_feature(frame, name='sync_pts')
+
+    # pts[:, [0, 2]] = pts[:, [2, 0]]
+    # pts[:, [1, 2]] = pts[:, [2, 1]]
+    # pts[:, 2] = - pts[:, 2]
+    # pts[:, 1] = - pts[:, 1]
+
+    # filter out longer distances
+    # dist_thresh = 5
+    # dist_mask = pts[:, 0] < dist_thresh
+
+    # pts = pts[dist_mask]
+
+    pts[:, 3:6] /= 255  # rgb to float
+
+    pose = np.eye(4)
+    for i in range(frame):
+        pose = np.dot(pose, new_pose_list[i])
+
+    pose_pts.append(pose[:3,-1])
+    global_pts_list.append(sequence.pts_to_frame(pts, pose))
+
+pose_pts = np.stack(pose_pts)
+visualize_points3D(pose_pts)
+
+vis_pts = np.concatenate(global_pts_list)
+visualize_points3D(vis_pts[:,:3], vis_pts[:,3:6])
 
 poses = np.stack([sequence.get_feature(idx, 'sync_pose') for idx in range(len(sequence))])
-pose_pts = poses[:,:3,-1]
+pose_pts2 = poses[:,:3,-1]
 
+visualize_multiple_pcls(pose_pts, pose_pts2)
 # rot_offset = Rotation.from_euler('xyz', [0,0,-np.pi/2], degrees=False).as_matrix()
 #
 # poses[:,:3,:3] = poses[:, :3, :3] @ rot_offset
@@ -123,6 +290,8 @@ visualize_points3D(all_pts, all_pts[:,3:6], point_size=0.004)
 #
 # plt.show()
 # visualize_points3D(all_pts, all_pts[:,3:6], point_size=0.001)
+
+
 
 
 # what has effect:

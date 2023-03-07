@@ -1,14 +1,15 @@
 import numpy as np
 from tqdm import tqdm
+from multiprocessing import Pool
 
-from models.utils.pillars import remove_out_of_bounds_points
+from FastFlow3D.utils.pillars import remove_out_of_bounds_points
 from motion_supervision.visibility import visibility_freespace, accumulate_static_points, compare_points_to_static_scene, transfer_voxel_visibility
-from datasets.structures.bev import BEV
+from my_datasets.structures.bev import BEV
 from timespace import box_utils
 
 # from Neural_Scene_Flow_Prior.my_flow import Small_Scale_SceneFlow_Solver
 
-from datasets.visualizer import *
+from my_datasets.visualizer import *
 
 # from timespace.box_utils import get_bbox_points
 
@@ -208,53 +209,92 @@ def mark_by_driving(pts, boxes, dyn_z_add=(1,1), stat_z_add=(10,0), z_object=0.3
 #         sequence.store_feature(frame_flow, idx=frame, name='ego_flow')
 
 
+def process_freespace(param_list):
+    sequence, cfg, i = param_list
+    print("Freespace frame: ", i)
+    local_pts = sequence.get_feature(i, 'lidar')
+
+    # REMOVE ego points
+    sensor_pose = sequence.sensor_position
+    sensor_valid_mask = np.linalg.norm(local_pts[:, :3] - sensor_pose[:3], axis=1) > sequence.min_sensor_radius  #
+
+    curr_pts, _ = remove_out_of_bounds_points(local_pts[sensor_valid_mask], cfg['x_min'], cfg['x_max'],
+                                              cfg['y_min'],
+                                              cfg['y_max'],
+                                              cfg['z_min'], sensor_pose[2])
+
+    accum_freespace_meters = visibility_freespace(curr_pts, sensor_pose, cfg)
+
+    ######
+    # -------------      Lidar  X  ----------------
+    # freespace freespace freespace freespace freespace
+    # -------------      Ground    ----------------
+    ######
+
+    below_ego_center_height = accum_freespace_meters[:, 2] > sensor_pose[2] - sequence.ego_box['size'][2] / 1.5
+    above_sensor_height = accum_freespace_meters[:, 2] < sensor_pose[2]  # cfg['freespace_max_height']
+    height_band = below_ego_center_height & above_sensor_height
+
+    accum_freespace_meters = accum_freespace_meters[height_band]
+
+    sequence.store_feature(accum_freespace_meters, idx=i, name='accum_freespace')
+
 def generate_freespace_from_sequence(sequence, cfg):
     '''
     :param sequence: a sequence of point clouds
     :param cfg: configuration file
     :return: freespace features for each point cloud in the sequence stored inside the sequence folder
     '''
-    for i in tqdm(range(len(sequence))):
-        # if i == 5: break
+    param_list = [[sequence, cfg, i] for i in range(len(sequence))]
+
+    pool = Pool()  # Create a multiprocessing Pool
+    pool.map(process_freespace, param_list)
+
+    pool.close()
+    pool.join()
+
+
+    # THIS IS A ORIGINAL
+    # for i in tqdm(range(len(sequence))):
+    #     if i == 5: break
         # if sequence.has_feature(idx=i, name='accum_freespace'):
         #     continue
         # else:
         #     local_pts = sequence.get_feature(i, 'lidar')
         #     sequence.store_feature(np.zeros(local_pts.shape[0]), i, name='accum_freespace')
 
-        local_pts = sequence.get_feature(i, 'lidar')
-        sensor_pose = sequence.sensor_position
-        sensor_valid_mask = np.linalg.norm(local_pts[:, :3] - sensor_pose[:3], axis=1) > sequence.min_sensor_radius #
-
-
-        curr_pts, _ = remove_out_of_bounds_points(local_pts[sensor_valid_mask], cfg['x_min'], cfg['x_max'], cfg['y_min'],
-                                                  cfg['y_max'],
-                                                  cfg['z_min'], sensor_pose[2])
-        # REMOVE ego points
-
-        accum_freespace_meters = visibility_freespace(curr_pts, sensor_pose, cfg)
-
-        # filter close road points etc.
-        # breakpoint()
-
-        ######
-        # -------------      Lidar  X  ----------------
-        # freespace freespace freespace freespace freespace
-        # -------------      Ground    ----------------
-        ######
-        # TODO this is parameter to ablate too, the center is design choice to make it look nice, but not optimal!
-        below_ego_center_height = accum_freespace_meters[:, 2] > sensor_pose[2] - sequence.ego_box['size'][2] / 1.5
-        above_sensor_height = accum_freespace_meters[:, 2] < sensor_pose[2] #cfg['freespace_max_height']
-        height_band = below_ego_center_height & above_sensor_height
-
-        accum_freespace_meters = accum_freespace_meters[height_band]
-
-        sequence.store_feature(accum_freespace_meters, idx=i, name='accum_freespace')
+        # local_pts = sequence.get_feature(i, 'lidar')
+        #
+        # # REMOVE ego points
+        # sensor_pose = sequence.sensor_position
+        # sensor_valid_mask = np.linalg.norm(local_pts[:, :3] - sensor_pose[:3], axis=1) > sequence.min_sensor_radius #
+        #
+        #
+        # curr_pts, _ = remove_out_of_bounds_points(local_pts[sensor_valid_mask], cfg['x_min'], cfg['x_max'], cfg['y_min'],
+        #                                           cfg['y_max'],
+        #                                           cfg['z_min'], sensor_pose[2])
+        #
+        # accum_freespace_meters = visibility_freespace(curr_pts, sensor_pose, cfg)
+        #
+        # ######
+        # # -------------      Lidar  X  ----------------
+        # # freespace freespace freespace freespace freespace
+        # # -------------      Ground    ----------------
+        # ######
+        #
+        # below_ego_center_height = accum_freespace_meters[:, 2] > sensor_pose[2] - sequence.ego_box['size'][2] / 1.5
+        # above_sensor_height = accum_freespace_meters[:, 2] < sensor_pose[2] #cfg['freespace_max_height']
+        # height_band = below_ego_center_height & above_sensor_height
+        #
+        # accum_freespace_meters = accum_freespace_meters[height_band]
+        #
+        # sequence.store_feature(accum_freespace_meters, idx=i, name='accum_freespace')
 
 def generate_visibility_prior(sequence, cfg):
 
     accum_freespace = []
-    for i in tqdm(range(len(sequence))):
+
+    for i in range(len(sequence)):
         # if i == 40:break
         freespace = sequence.get_feature(i, 'accum_freespace')
         current_pose = sequence.get_feature(i, 'pose')
@@ -266,31 +306,134 @@ def generate_visibility_prior(sequence, cfg):
     accum_freespace = np.concatenate(accum_freespace)
 
     for i in tqdm(range(len(sequence))):
-
+        # if i != 4481: continue
         global_pts = sequence.get_global_pts(i, 'lidar')
         local_pts = sequence.get_feature(i, 'lidar')
         visibility_prior = np.zeros(global_pts.shape[0], dtype='int64')
 
-        _, mask = remove_out_of_bounds_points(local_pts, cfg['x_min'], cfg['x_max'], cfg['y_min'], cfg['y_max'], cfg['z_min'], cfg['z_max'])
+        _, mask = remove_out_of_bounds_points(local_pts, cfg['x_min'], cfg['x_max'], cfg['y_min'], cfg['y_max'],
+                                              cfg['z_min'], cfg['z_max'])
+        # accum_freespace = []
 
-        # to not have everything in memory
-        # visibility_prior = compare_points_to_static_scene(accum_freespace, global_pts, cell_size=cfg['cell_size'])
-        # todo check this shit
+        # max_diff = cfg['correction_time']    # todo calculate it in config file
+        # if i >= max_diff and i < len(sequence) - max_diff:
+        #     for adjacent_i in range(i - max_diff, i + max_diff + 1):
+        #         # if i == 40:break
+        #
+        #         freespace = sequence.get_feature(adjacent_i, 'accum_freespace')
+        #         current_pose = sequence.get_feature(adjacent_i, 'pose')
+        #
+        #         global_freespace = sequence.pts_to_frame(freespace, current_pose)
+        #
+        #         accum_freespace.append(global_freespace)
+        #
+        #     accum_freespace = np.concatenate(accum_freespace)
+
+
+            # todo check this shit
         pts_in_freespace = transfer_voxel_visibility(accum_freespace, global_pts[mask], cell_size=cfg['cell_size'])
 
         visibility_prior[mask] = pts_in_freespace
 
         sequence.store_feature(visibility_prior, idx=i, name='visibility_prior')
 
+def process_static(param_list):
+    sequence, cfg, frame = param_list
+
+    print("Static features: ", frame)
+
+    if frame + cfg['required_static_time'] >= len(sequence):
+        diff_to_end = len(sequence) - frame
+
+        before_indices = list(range(frame - (cfg['required_static_time'] - diff_to_end), frame))
+        after_frame_indices = list(range(frame, len(sequence)))
+
+        indices = before_indices + after_frame_indices
+
+    else:
+        indices = list(range(frame, frame + cfg['required_static_time']))
+
+    global_pts_list = []
+
+    # accumulate freespace
+    accum_freespace = []
+    # get required static before and after
+    accum_indices = range(frame - cfg['required_static_time'], frame + cfg['required_static_time'] + 1)
+
+    for i in accum_indices:
+
+        if i >= 0 and i < len(sequence):
+
+            freespace = sequence.get_feature(i, 'accum_freespace')
+            current_pose = sequence.get_feature(i, 'pose')
+
+            global_freespace = sequence.pts_to_frame(freespace, current_pose)
+            accum_freespace.append(global_freespace)
+
+    accum_freespace = np.concatenate(accum_freespace)
+
+    for i in indices:
+        # global_pts_list = [sequence.get_global_pts(idx=i, name='lidar') for i in indices]
+
+        # curr_pts = sequence.get_feature(idx=frame, name='lidar')
+        # smaller_pts, mask = remove_out_of_bounds_points(curr_pts, cfg['x_min'], cfg['x_max'], cfg['y_min'],
+        # cfg['y_max'], cfg['z_min'], cfg['z_max'])
+
+        global_pts = sequence.get_global_pts(idx=i, name='lidar')
+        # global_pts = global_pts[mask]
+
+        global_pts_list.append(global_pts)
+
+    # Run the static generation for point clouds of interest
+    current_pts = sequence.get_global_pts(frame, 'lidar')
+
+    static_prior = np.zeros(current_pts.shape[0], dtype='int')
+
+    in_freespace_mask = transfer_voxel_visibility(accum_freespace, current_pts, cfg['static_cell_size'])
+    # print(indices)
+    for around_pts in global_pts_list:
+        one_static_mask = transfer_voxel_visibility(around_pts, current_pts, cfg['static_cell_size'])
+        static_prior += (one_static_mask > 0).astype('int')
+
+    # point previously visible and mistakes of noise in odometry
+    # this is for cases like the truck in SemanticKitti 27 sequence
+    static_prior[in_freespace_mask == 1] = -1
+
+    sequence.store_feature(static_prior, idx=frame, name='prior_static_mask')
+
+
 def generate_static_points_from_sequence(sequence, cfg):
+    # todo ADD visibility condition. If visible previously, then remove static label from all freespace? done
+    # todo project static from this visibility condition. (not all because of trees over streets etc)
+
+    accum_freespace = []
+    for frame in range(len(sequence)):
+        freespace = sequence.get_feature(frame, 'accum_freespace')
+        current_pose = sequence.get_feature(frame, 'pose')
+
+        global_freespace = sequence.pts_to_frame(freespace, current_pose)
+
+        accum_freespace.append(global_freespace)
+
+    accum_freespace = np.concatenate(accum_freespace)
+
+    # create one voxel map
+    # compare the voxel map with pts to generate in freespace mask
+    # compare the points in it
+
+    # param_list = [[sequence, cfg, i] for i in range(len(sequence))]
+    #
+    # pool = Pool()  # Create a multiprocessing Pool
+    # pool.map(process_static, param_list)
+    #
+    # pool.close()
+    # pool.join()
 
     for frame in tqdm(range(len(sequence))):
-
-
         if frame + cfg['required_static_time'] >= len(sequence):
             diff_to_end = len(sequence) - frame
 
-            before_indices = list(range( frame - (cfg['required_static_time'] - diff_to_end), frame))
+            before_indices = list(range(frame - (cfg['required_static_time'] - diff_to_end), frame))
             after_frame_indices = list(range(frame, len(sequence)))
 
             indices = before_indices + after_frame_indices
@@ -300,12 +443,29 @@ def generate_static_points_from_sequence(sequence, cfg):
 
         global_pts_list = []
 
+        # accumulate freespace
+        # accum_freespace = []
+        # get required static before and after
+        # accum_indices = range(frame - cfg['required_static_time'], frame + cfg['required_static_time'] + 1)
+
+        # for i in accum_indices:
+        #
+        #     if i >= 0 and i < len(sequence):
+        #
+        #         freespace = sequence.get_feature(i, 'accum_freespace')
+        #         current_pose = sequence.get_feature(i, 'pose')
+        #
+        #         global_freespace = sequence.pts_to_frame(freespace, current_pose)
+        #         accum_freespace.append(global_freespace)
+        #
+        # accum_freespace = np.concatenate(accum_freespace)
+
         for i in indices:
-        # global_pts_list = [sequence.get_global_pts(idx=i, name='lidar') for i in indices]
+            # global_pts_list = [sequence.get_global_pts(idx=i, name='lidar') for i in indices]
 
             # curr_pts = sequence.get_feature(idx=frame, name='lidar')
             # smaller_pts, mask = remove_out_of_bounds_points(curr_pts, cfg['x_min'], cfg['x_max'], cfg['y_min'],
-                                                          # cfg['y_max'], cfg['z_min'], cfg['z_max'])
+            # cfg['y_max'], cfg['z_min'], cfg['z_max'])
 
             global_pts = sequence.get_global_pts(idx=i, name='lidar')
             # global_pts = global_pts[mask]
@@ -317,18 +477,27 @@ def generate_static_points_from_sequence(sequence, cfg):
 
         static_prior = np.zeros(current_pts.shape[0], dtype='int')
 
+        in_freespace_mask = transfer_voxel_visibility(accum_freespace, current_pts, cfg['static_cell_size'])
         # print(indices)
         for around_pts in global_pts_list:
             one_static_mask = transfer_voxel_visibility(around_pts, current_pts, cfg['static_cell_size'])
             static_prior += (one_static_mask > 0).astype('int')
 
+        # point previously visible and mistakes of noise in odometry
+        # this is for cases like the truck in SemanticKitti 27 sequence
+        static_prior[in_freespace_mask == 1] = -1
+
         sequence.store_feature(static_prior, idx=frame, name='prior_static_mask')
+
+
 
 def correct_the_dynamic_priors(sequence, cfg=None):
 
     corr_time = cfg['correction_time']
 
     for frame in tqdm(range(0, len(sequence))): # tmp
+
+        # if frame != 4481: continue
 
         pts1 = sequence.get_global_pts(idx=frame, name='lidar')
         ego_prior1 = sequence.get_feature(idx=frame, name='ego_prior_label')
@@ -345,7 +514,7 @@ def correct_the_dynamic_priors(sequence, cfg=None):
         corrected_prior = transfer_voxel_visibility(adjacent_frames, pts1, cell_size=cfg['cell_size'])
 
         # Correct priors and store them separately
-        ego_prior1[corrected_prior > 0] = 0  # nbr of points from adjacent frame is present in same space
+        ego_prior1[corrected_prior == 1] = -1  # nbr of points from adjacent frame is present in same space
         sequence.store_feature(ego_prior1, idx=frame, name='corrected_ego_prior_label')
         sequence.store_feature(corrected_prior, idx=frame, name='correction_prior')
 
@@ -359,6 +528,8 @@ def project_dynamic_label_to_cell(sequence, cfg):
 
     for frame in tqdm(range(len(sequence))):
 
+        # if frame != 4481: continue
+
         prior_label = - np.ones(sequence.get_feature(idx=frame, name='lidar').shape[0], dtype=np.int32)
 
         # this should be rewritten anyway
@@ -367,21 +538,29 @@ def project_dynamic_label_to_cell(sequence, cfg):
         prior_label[ego_label == 1] = 1  # dynamic object
 
 
-        # visibility_label = sequence.get_feature(idx=frame, name='visibility_prior')
-        visibility_label = sequence.get_feature(idx=frame, name='corrected_visibility_prior')
-        prior_label[visibility_label > 0] = 1
 
+
+        pts1 = sequence.get_feature(frame, name='lidar')
+        Bev.create_bev_template_from_points(pts1)
 
         prior_static_mask = sequence.get_feature(idx=frame, name='prior_static_mask')
         prior_label[prior_static_mask == cfg['required_static_time']] = 0  # determistically static
 
+        deselect_static_grid = Bev.generate_bev(pts1[prior_static_mask == -1], 1)
+        deselect_static_mask = Bev.transfer_features_to_points(pts1, deselect_static_grid)
+        prior_label[deselect_static_mask == 1] = -1     # throw away accumulated static points, that are in the freespace (truck, slow, stopping objects)
+
+        # Dynamic
+        visibility_label = sequence.get_feature(idx=frame, name='visibility_prior')
+        corrected_visibility_label = sequence.get_feature(idx=frame, name='corrected_visibility_prior')
+        visibility_mask = (visibility_label == 1) & (corrected_visibility_label == 1)
+        prior_label[visibility_mask] = 1
 
         road_label = sequence.get_feature(idx=frame, name='road_proposal')
         prior_label[road_label == True] = 0
 
         # Now prior label is preloaded for processing
-        pts1 = sequence.get_feature(frame, name='lidar')
-        Bev.create_bev_template_from_points(pts1)
+
 
         # final_prior = sequence.get_feature(frame, name='final_prior_label')
 
@@ -390,6 +569,9 @@ def project_dynamic_label_to_cell(sequence, cfg):
         lowest_indices = pts1[:, 2].argsort()[::-1]
 
         lowest_height_grid = Bev.generate_bev(pts1[lowest_indices], pts1[lowest_indices, 2])
+
+
+
 
         dynamic_grid = Bev.generate_bev(pts1[indices], prior_label[indices])
 
@@ -400,7 +582,7 @@ def project_dynamic_label_to_cell(sequence, cfg):
         # add heightest point to separate trees above
         # prop_height_lower_boundary = Bev
 
-        #todo this should be elsewhere
+
         # deselect the dynamic, when it the cell has z_var < z_var for road
         deselect_dynamic = pts1[prior_label == 1, 2] > prop_height[prior_label == 1] + cfg['z_var_road']
         deselect_dynamic = 2 * deselect_dynamic - 1         # 1 keep dynamic, -1 to unlabelled
@@ -420,6 +602,7 @@ def project_dynamic_label_to_cell(sequence, cfg):
         # Store final gen label!
         sequence.store_feature(final_dynamic, frame, name='final_prior_label')
 
+
 def store_final_priors_in_mos_format(sequence):
 
     for frame in tqdm(range(len(sequence))):
@@ -431,8 +614,8 @@ def store_final_priors_in_mos_format(sequence):
 
 if __name__ == '__main__':
     from motion_supervision import constants as C
-    from datasets.argoverse.argoverse2 import Argoverse2_Sequence
-    from datasets.kitti.semantic_kitti import SemanticKitti_Sequence
+    from my_datasets.argoverse.argoverse2 import Argoverse2_Sequence
+    from my_datasets.kitti.semantic_kitti import SemanticKitti_Sequence
     import sys
 
     # loop over used datasets, when ready

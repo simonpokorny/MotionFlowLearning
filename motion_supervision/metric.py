@@ -136,8 +136,8 @@ class IOU(torch.nn.Module):
         ).toarray()
 
         tps = np.diag(tmp_cm)
-        fps = tmp_cm.sum(1) - tps
-        fns = tmp_cm.sum(0) - tps
+        fps = tmp_cm.sum(0) - tps
+        fns = tmp_cm.sum(1) - tps
         self.cm += tmp_cm
         self.tps += tps
         self.fps += fps

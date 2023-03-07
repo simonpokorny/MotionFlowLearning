@@ -1,6 +1,6 @@
 import torch
 
-from datasets.argoverse.argoverse2 import Argoverse2_Sequence
+from my_datasets.argoverse.argoverse2 import Argoverse2_Sequence
 from motion_supervision.generate_priors import run_instance_generation
 
 

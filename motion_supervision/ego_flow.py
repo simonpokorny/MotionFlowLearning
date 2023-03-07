@@ -1,8 +1,8 @@
-from datasets.argoverse.argoverse2 import Argoverse2_Sequence
+from my_datasets.argoverse.argoverse2 import Argoverse2_Sequence
 from motion_supervision.connect_points import match_points_unique_cluster
 from motion_supervision.transfer import Dynamic_Instance
 
-from datasets.visualizer import *
+from my_datasets.visualizer import *
 
 config = {'exp_name' : "Toy",
           'matching_algo' : 'match_points_unique_cluster',

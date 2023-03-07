@@ -26,10 +26,55 @@ from argparse import ArgumentParser
 from collections import defaultdict
 
 import pytorch_lightning as pl
+from pytorch3d.ops.knn import knn_points
 import torch
 
 from models.utils import str2bool
 
+
+# def NN_loss(x, y, x_lengths=None, y_lengths=None, reduction='mean'):
+#
+#     # max_pts_p = np.argmax((x.shape[1], y.shape[1]))
+#     # N_pts_x = x.shape[1]
+#
+#     # if max_pts_p == 0:
+#     #     N_pad = x.shape[1] - y.shape[1]
+#     #     y = torch.nn.functional.pad(y, (0,0,0,N_pad,0,0))
+#
+#     # else:
+#     #     N_pad = y.shape[1] - x.shape[1]
+#     #     x = torch.nn.functional.pad(y, (0,0,0,N_pad,0,0))
+#
+#     x_nn = knn_points(x, y, lengths1=x_lengths, lengths2=y_lengths, K=1, norm=1)
+#     y_nn = knn_points(y, x, lengths1=y_lengths, lengths2=x_lengths, K=1, norm=1)
+#
+#     # hack, maybe can be done better
+#     # if max_pts_p == 0:
+#
+#     cham_x = x_nn.dists[..., 0]  # (N, P1)
+#     cham_y = y_nn.dists[..., 0]  # (N, P2)
+#
+#     nearest_to_y = x_nn[1]
+#
+#     # else:
+#     #     cham_x = x_nn.dists[:N_pts_x, 0]  # (N, P1)
+#     # cham_y = y_nn.dists[:N_pts_x, 0]  # (N, P2)
+#     #
+#     # nearest_to_y = x_nn[1][:,N_pts_x]
+#
+#     nn_loss = (cham_x + cham_y) / 2
+#
+#     if reduction == 'mean':
+#         nn_loss = nn_loss.mean()
+#     elif reduction == 'sum':
+#         nn_loss = nn_loss.sum()
+#     elif reduction == 'none':
+#         nn_loss = nn_loss
+#     else:
+#         raise NotImplementedError
+#
+#     # breakpoint()
+#     return nn_loss, nearest_to_y
 
 class BaseModelSlim(pl.LightningModule):
     def __init__(self,
@@ -131,6 +176,8 @@ class BaseModelSlim(pl.LightningModule):
         metrics.update(L2_thresholds)
         return loss, metrics
 
+
+
     def general_step(self, batch, batch_idx, mode):
         """
         A function to share code between all different steps.
@@ -148,20 +195,105 @@ class BaseModelSlim(pl.LightningModule):
         # It is True for all points that just are NOT padded and of size (batch_size, max_points)
         current_frame_masks = x[1][2]
         # Remove all points that are padded
-        y = y[current_frame_masks]
-        y_hat = y_hat[current_frame_masks]
+
+
+        # dim 0 - forward and backward flow
+        # dim 1 - outputs based on raft iteration (len == nbr of iter)
+        # dim 2 - pointwise outputs, static aggr, dynamic threshold, bev outputs
+
+        fw_pointwise = y_hat[0][-1][0]  # -1 for last raft output?
+        fw_bev = y_hat[0][-1][3]
+        fw_trans = y_hat[0][-1][1].cuda()
+        bw_trans = y_hat[1][-1][1].cuda()
+
+        # todo backward pass as well
+        # todo if more samples in batch than 1, it needs to be verified
+        # NN
+        # forward
+        # .cuda() should be optimized
+        p_i = x[0][0][..., :3].float().cuda() # pillared - should be probably returned to previous form
+        #p_i = p_i[..., :3] + p_i[..., 3:6]# previous form
+        p_j = x[1][0][..., :3].float().cuda()
+        # p_j = p_j[..., :3] + p_j[..., 3:6]# previous form
+
+        # this is ambiguous, not sure if there is difference between static_flow and dynamic_flow
+        # static ---> aggregated_static?
+        raw_flow_i = fw_pointwise['dynamic_flow'].cuda()
+        rigid_flow = fw_pointwise['static_aggr_flow'].cuda()
+
+        fw_raw_flow_nn = knn_points(p_i + raw_flow_i, p_j, lengths1=None, lengths2=None, K=1, norm=1)
+        fw_rigid_flow_nn = knn_points(p_i + rigid_flow, p_j, lengths1=None, lengths2=None, K=1, norm=1)
+
+        # todo remove outlier percentage
+        cham_x = fw_raw_flow_nn.dists[..., 0] + fw_rigid_flow_nn.dists[..., 0]  # (N, P1)
+
+        # nearest_to_p_j = fw_raw_flow_nn[1]
+        nn_loss = cham_x.max()
+
+        # Rigid Cycle
+        trans_p_i = torch.cat((p_i, torch.ones((len(p_i), p_i.shape[1], 1), device=p_i.device)), dim=2)
+        bw_fw_trans = bw_trans @ fw_trans - torch.eye(4, device=fw_trans.device)
+        # todo check this in visualization, if the points are transformed as in numpy
+        res_trans = torch.matmul(bw_fw_trans, trans_p_i.permute(0, 2, 1)).norm(dim=1)
+
+        rigic_cycle_loss = res_trans.mean()
+
+        # Artificial label loss - for previous time not second
+        def construct_batched_cuda_grid(pts, feature, x_min=-35, y_min=-35, grid_size=640):
+            '''
+            Assumes BS x N x CH (all frames same number of fake pts with zeros in the center)
+            :param pts:
+            :param feature:
+            :param cfg:
+            :return:
+            '''
+            BS = len(pts)
+            bs_ind = torch.cat([bs_idx * torch.ones(pts.shape[1], dtype=torch.long, device=pts.device) for bs_idx in range(BS)])
+
+            feature_grid = - torch.ones(BS, grid_size, grid_size, device=pts.device).long()
+
+            cell_size = torch.abs(2 * torch.tensor(x_min / grid_size))
+
+            coor_shift = torch.tile(torch.tensor((x_min, y_min), dtype=torch.float, device=pts.device), dims=(BS, 1, 1))
+
+            feature_ind = ((pts[:, :, :2] - coor_shift) / cell_size).long()
+
+            # breakpoint()
+            feature_grid[bs_ind, feature_ind.flatten(0, 1)[:, 0], feature_ind.flatten(0, 1)[:, 1]] = feature.flatten().long()
+
+            return feature_grid
+
+
+        dynamic_states = (fw_raw_flow_nn.dists[..., 0] > fw_rigid_flow_nn.dists[..., 0]) + 1
+        art_label_grid = construct_batched_cuda_grid(p_i, dynamic_states, x_min=-35, y_min=-35, grid_size=640)
+
+        p_i_grid_class = fw_bev['class_logits'].cuda()
+
+        # In paper, they have Sum instead of Mean, we should check original codes
+        art_CE = torch.nn.CrossEntropyLoss(ignore_index=-1)
+        artificial_class_loss = art_CE(p_i_grid_class, art_label_grid)
+
+        # y = y[current_frame_masks]
+        loss = 2. * nn_loss + 1. * rigic_cycle_loss + 0.1 * artificial_class_loss
+        # loss.backward()   # backward probehne
+
+        print(f"NN loss: {nn_loss.item():.4f}, Rigid cycle loss: {rigic_cycle_loss.item():.4f}, Artificial label loss: {artificial_class_loss.item():.4f}")
+
+        metrics = 0
+        # y_hat = y_hat[current_frame_masks]
         # This will yield a (n_real_points, 3) tensor with the batch size being included already
 
+
         # The first 3 dimensions are the actual flow. The last dimension is the class id.
-        y_flow = y[:, :3]
+        # y_flow = y[:, :3]
         # Loss computation
-        labels = y[:, -1].int()  # Labels are actually integers so lets convert them
+        # labels = y[:, -1].int()  # Labels are actually integers so lets convert them
         # Remove datapoints with no flow assigned (class -1)
-        mask = labels != -1
-        y_hat = y_hat[mask]
-        y_flow = y_flow[mask]
-        labels = labels[mask]
-        loss, metrics = self.compute_metrics(y_flow, y_hat, labels)
+        # mask = labels != -1
+        # y_hat = y_hat[mask]
+        # y_flow = y_flow[mask]
+        # labels = labels[mask]
+        # loss, metrics = self.compute_metrics(y_flow, y_hat, labels)
 
         return loss, metrics
 

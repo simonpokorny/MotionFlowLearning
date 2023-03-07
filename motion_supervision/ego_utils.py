@@ -7,7 +7,7 @@ from sklearn.cluster import DBSCAN
 from tqdm import tqdm
 from scipy.spatial.transform import Rotation
 
-from datasets.structures.bev import BEV
+from my_datasets.structures.bev import BEV
 from motion_supervision.generate_priors import correct_the_dynamic_priors
 
 
@@ -57,7 +57,7 @@ def get_ego_pts_in_all_poses(ego_pts, ego_poses):
 
 def get_driven_pts(global_pts, all_ego_pts, ego_box, cell_size=(0.2,0.2)):
 
-    bev = BEV(cell_size=cell_size)
+    bev = BEV(cell_size=(cell_size[0], cell_size[1]))
     bev.create_bev_template_from_points(*[all_ego_pts, global_pts])
 
     # -1 is reserved for not driven
@@ -121,7 +121,7 @@ def split_proposals_to_object_and_road(global_pts, ego_driven, object_proposals,
         prop_pts = global_pts[ego_driven == proposals_times]
 
 
-        bev = BEV(cell_size=cell_size)
+        bev = BEV(cell_size=(cell_size[0], cell_size[1]))
         bev.create_bev_template_from_points(prop_pts)
         # xy = bev.return_point_coordinates(prop_pts)
 
@@ -308,8 +308,8 @@ def generate_ego_priors_for_sequence(sequence, cfg):
 
 if __name__ == '__main__':
     from motion_supervision.constants import ego_prior_params
-    from datasets.waymo.waymo import Waymo_Sequence
-    from datasets.kitti.semantic_kitti import SemanticKitti_Sequence
+    from my_datasets.waymo.waymo import Waymo_Sequence
+    from my_datasets.kitti.semantic_kitti import SemanticKitti_Sequence
     # from my_datasets.visualizer import *
 
     if len(sys.argv) > 1:

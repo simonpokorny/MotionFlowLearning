@@ -8,7 +8,7 @@ from pytorch3d.ops.points_alignment import iterative_closest_point
 from sklearn.neighbors import NearestNeighbors
 from munkres import Munkres
 
-from datasets import visualizer
+from my_datasets import visualizer
 
 
 def Hungarian_point_matching(selected_points, to_match_points, plot=False):
@@ -339,7 +339,7 @@ def ICP_with_yaw_only():
             plt.close()
 
 if __name__ == "__main__":
-    from datasets.waymo.waymo import Waymo_Sequence
+    from my_datasets.waymo.waymo import Waymo_Sequence
     sequence = Waymo_Sequence(23)
     pts1 = sequence.get_global_pts(44, 'lidar')
     pts2 = sequence.get_global_pts(45, 'lidar')

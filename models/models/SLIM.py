@@ -196,10 +196,11 @@ class SLIM(BaseModelSlim):
         # logits, static_flow, dynamic_flow, weights are concatinate in channels in shapes [4, 2, 2, 1]
         outputs_fw, outputs_bw = self._raft(pillar_embeddings)
 
+        # breakpoint()
         # Transformation matrix Current (t1) to Previous (t0)
-        C_T_P = np.linalg.inv(G_T_C) @ G_T_P
+        C_T_P = torch.linalg.inv(G_T_C) @ G_T_P
         # Transformation matrix Previous (t0) to Current (t1)
-        P_T_C = np.linalg.inv(G_T_P) @ G_T_C
+        P_T_C = torch.linalg.inv(G_T_P) @ G_T_C
 
         predictions_fw = []
         predictions_bw = []
@@ -221,7 +222,7 @@ class SLIM(BaseModelSlim):
 
             prediction_bw = self._decoder_bw(
                 network_output=raft_output_1_0,
-                dynamicness_threshold=self.moving_dynamicness_threshold.value(),
+                dynamicness_threshold=self._moving_dynamicness_threshold.value(),
                 pc=current_batch_pc,
                 pointwise_voxel_coordinates_fs=current_voxel_coordinates,
                 pointwise_valid_mask=current_batch_mask,
@@ -235,6 +236,7 @@ class SLIM(BaseModelSlim):
 
             # TODO optimization of _moving_dynamicness_threshold
 
+
         return predictions_fw, predictions_bw
 
 
@@ -244,7 +246,7 @@ if __name__ == "__main__":
     grid_cell_size = 0.109375
     from datasets.waymoflow.WaymoDataModule import WaymoDataModule
 
-    dataset_path = "../../data/waymoflow_subset"
+    dataset_path = "data/waymoflow_subset"
     # dataset_path = "/Users/simonpokorny/mnt/data/waymo/raw/processed/training"
 
     data_module = WaymoDataModule(dataset_directory=dataset_path,

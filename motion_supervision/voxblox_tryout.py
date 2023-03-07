@@ -5,7 +5,7 @@ from voxblox import (
     SimpleTsdfIntegrator,
 )
 
-from datasets.delft.drone import Delft_Sequence
+from my_datasets.delft.drone import Delft_Sequence
 import glob
 import numpy as np
 
@@ -28,7 +28,7 @@ for i in range(len(sequence)):
     if i == 80: break
 
 
-from datasets.visualizer import visualize_points3D
+from my_datasets.visualizer import visualize_points3D
 visualize_points3D(pts[:,:3], pts[:,3:6])
 
 import open3d as o3d

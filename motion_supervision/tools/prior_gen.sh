@@ -5,7 +5,7 @@
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=6
 
-#SBATCH --mem=50G
+#SBATCH --mem=40G
 #SBATCH --partition=amdlong
 
 #SBATCH --error=logs/data_preprocess_%a.out

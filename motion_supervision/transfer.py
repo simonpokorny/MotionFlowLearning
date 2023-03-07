@@ -3,8 +3,8 @@ from hdbscan import HDBSCAN
 from sklearn.cluster import DBSCAN
 
 import motion_supervision.visibility
-from datasets import visualizer
-from datasets.instances import Instance3D
+from my_datasets import visualizer
+from my_datasets.instances import Instance3D
 
 from timespace.geometry import center_position_and_surrounding, min_square_by_pcl, point_distance_from_hull
 from motion_supervision.motionflow import Fit_rigid_transoform, pytorch3d_ICP
