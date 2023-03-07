@@ -6,3 +6,4 @@ checkpoints
 data/waymo_dataset
 *.pyc
 .DC_Store
+__pycache__

@@ -1,0 +1,153 @@
+default:
+  # n_pillars_x (int): The number of pillars in the x dimension of the voxel grid.
+  n_pillars_x: 640
+  # n_pillars_y (int): The number of pillars in the y dimension of the voxel grid.
+  n_pillars_y: 640
+  # point_features (int): The number of features in each point of the input point clouds.
+  point_features: 8
+
+moving_threshold:
+  # unsupervised (bool): Flag indicating if the training is unsupervised or not.
+  unsupervised: True
+  # num_train_samples (int): Number of training samples. TODO Must be filled with correct samples
+  num_train_samples: 99999
+  # num_moving (int): Number of moving samples. In self-supervised manner, num of points in all train dataset.
+  # TODO Must be filled with correct samples
+  num_moving: 9999
+  # num_still (int, optional): Number of still samples. Required only for supervised training.
+  num_still: null # None
+
+raft:
+  # iters (int): The number of iterations for the optical flow algorithm in the network.
+  iters: 6
+  # corr_levels (int): The number of correlation levels for the correlation module in the network.
+  # correlation levels in correlation pyramid
+  corr_levels: 4
+  # corr_radius (int): The radius for the correlation module in the network.
+  # correlation radius
+  corr_radius: 3
+  # alternate_corr (bool): A boolean indicating whether to use alternate correlation in the network.
+  # >>> TODO NotImplementedError
+  alternate_corr: False
+  # feature_downsampling_factor (int): The downsampling factor for the features in the network.
+  feature_downsampling_factor:  8
+  # predict_weight_for_static_aggregation (bool): A boolean indicating whether to predict weight for
+  # static aggregation in the network (Kabsch Algorithm).
+  predict_weight_for_static_aggregation: True
+  # hdim (int): The number of channels hidden dimensions in the network.
+  hdim: 96
+  # cdim (int): The number of channels context dimensions in the network.
+  cdim: 64
+  # "vanilla"  for not predicting logits / "single" for predictiong logits and weights for kabsch
+  flow_maps_archi: "single"
+  # corr_module (str): The correlation module to use in the network (either "all" or "full").
+  # corr module only "all"
+  corr_module: "all"
+  # learn_upsampling_mask (bool): A boolean indicating whether to learn the upsampling mask in the network.
+  # >>> TODO NotImplementedError
+  learn_upsampling_mask: False
+
+
+decoder:
+  # bool if to predict weight for static aggregation (weighted Kabsch)
+  predict_weight_for_static_aggregation: True
+  #
+  use_static_aggr_flow_for_aggr_flow: False
+  use_dynamic_aggr_flow_for_aggr_flow: False
+  # TODO ?? I am not sure
+  dynamic_flow_is_non_rigid_flow: False
+
+
+  artificial_network_config:
+    # bool if to overwrite non-filled pillars with default flow
+    # default values for nonfilled pillars:
+    #  - static_flow: 0.0,
+    #  - dynamic_flow: 0.0,
+    #  - static_aggr_flow: 0.0,
+    overwrite_non_filled_pillars_with_default_flow: True
+    # default values for nonfilled pillars:
+    #  - disappearing_logit: -100.0,
+    #  - static_logit: -100.0 if self.static_logit is False else 0.0,
+    #  - dynamic_logit: 0.0 if self.dynamic_logit is True else -100.0,
+    #  - ground_logit : 0.0 if self.ground_logit is True else -100.0,
+    overwrite_non_filled_pillars_with_default_logits: True
+    # From which source the logits will be taken
+    #  - True, compute only the static logits.
+    #  - False, assume they're not needed.
+    #  - 'net', compute them as the network output.
+    #  - 'gt_label_based', >>> NotImplementedError()
+    #  - 'gt_flow_based', >>> NotImplementedError()
+    static_logit: "net"
+    # From which source the logits will be taken
+    # - True, compute only the dynamic logits.
+    # - False, assume they're not needed.
+    # – 'net', compute them as the network output.
+    # - 'gt_label_based', >>> NotImplementedError()
+    # - -gt_flow_based', >>> NotImplementedError()
+    dynamic_logit: "net"
+    # From which source the logits will be taken
+    # - True, compute only the dynamic logits.
+    # - False, assume they're not needed.
+    # – 'net', compute them as the network output.
+    # - 'gt_label_based', NotImplementedError()
+    ground_logit: False
+    # Param for Kabsch
+    use_epsilon_for_weighted_pc_alignment: False
+    # From which source the logits will be taken
+    # - True, compute only the dynamic logits. All values are set to 0
+    # - False, assume they're not needed. All values are set to -100
+    # – 'net', compute them as the network output.
+    # - 'gt', >>> NotImplementedError()
+    disappearing_logit: False
+    # From which source the flow will be taken
+    # - 'net'
+    # - 'gt',
+    # - 'zero'
+    static_flow: "net"
+    # From which source the flow will be taken
+    # - 'net'
+    # - 'gt',
+    # - 'zero'
+    dynamic_flow: "net"
+    # if to use weights from for static aggregation TODO
+    # - False
+    # - softmax
+    # - sigmoid (They used normalized sigmoid)
+    predict_weight_for_static_aggregation: False
+
+
+# taken from official repo
+losses:
+  dynamicness:
+    static_with_high_dyn_penalty__perc: 60.0
+    penalty_upper_perc: 0.0
+    penalty_lower_perc: 0.0
+  fw_bw_static_trafo_penalty_factor: 1.0
+  knn_loss_penalty_factor: 1.0
+  artificial_labels:
+    use_static_aggr_flow: True
+    cross_entropy_penalty: 0.0
+    weight_mode: constant
+    discrepancy_threshold: 0.05
+    mixture_distance: 0.05
+    gauss_widths: null
+    knn_mode: point
+  knn_on_dynamic_penalty: 0.0
+  knn_on_static_penalty: 0.0
+  knn_dist_measure: point
+  knn_loss:
+    L1_delta: 0.0
+    drop_outliers__perc: 0.0
+    fov_mode: mask_close_fov
+  occlusion_penalty_factor: 0.0
+  opposite_flow_penalty_factor: 0.0
+  static_flow_penalty_factor: 1.0
+  temporal_cls_consistency_penalty_factor: 0.0
+  smoothness_penalty_factor:
+    static: 0.0
+    dynamic: 0.0
+    aggregated: 0.0
+  use_epsilon_for_weighted_pc_alignment: False
+  num_neighbors_smoothness_penalty: 5
+
+

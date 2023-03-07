@@ -1,5 +1,3 @@
-from typing import Dict, Tuple, Any
-
 import numpy as np
 import pytorch_lightning as pl
 import torch
@@ -7,15 +5,14 @@ from torch import Tensor
 
 from .artificialNetwork import ArtificialNetworkOutput
 
+
 class OutputDecoder(pl.LightningModule):
     def __init__(self,
                  predict_weight_for_static_aggregation=True,
                  use_static_aggr_flow_for_aggr_flow=False,
                  use_dynamic_aggr_flow_for_aggr_flow=False,
-                 ohe_gt_stat_dyn_ground_label_bev_map=None,
                  dynamic_flow_is_non_rigid_flow=False,
-                 overwrite_non_filled_pillars_with_default_flow=True,
-                 overwrite_non_filled_pillars_with_default_logits=True):
+                 artificial_network_config=None):
         """
         Initializes the OutputDecoder module.
 
@@ -23,36 +20,37 @@ class OutputDecoder(pl.LightningModule):
             - predict_weight_for_static_aggregation (bool): If True, predicts weights for static aggregation
             - use_static_aggr_flow_for_aggr_flow (bool): If True, uses static flow for aggregation flow
             - use_dynamic_aggr_flow_for_aggr_flow (bool): If True, uses dynamic flow for aggregation flow
-            - ohe_gt_stat_dyn_ground_label_bev_map (Tensor): Optional tensor of shape [batch_size, height, width, 3]
-                representing the one-hot encoded ground truth labels for static/dynamic/ground objects in the BEV grid
+              representing the one-hot encoded ground truth labels for static/dynamic/ground objects in the BEV grid
             - dynamic_flow_is_non_rigid_flow (bool): If True, indicates that the dynamic flow is non-rigid
             - overwrite_non_filled_pillars_with_default_flow (bool): If True, overwrites non-filled pillars with the
                 default flow
             - overwrite_non_filled_pillars_with_default_logits (bool): If True, overwrites non-filled pillars with the
                 default logits
+            - artificial_network_config (dict): Config for ArtificialNetworkOutput()
         """
 
-        super(OutputDecoder, self).__init__()
+        super().__init__()
+
+        self.flow_dim = 2
 
         self.predict_weight_for_static_aggregation = predict_weight_for_static_aggregation
         self.use_static_aggr_flow_for_aggr_flow = use_static_aggr_flow_for_aggr_flow
         self.use_dynamic_aggr_flow_for_aggr_flow = use_dynamic_aggr_flow_for_aggr_flow
-        self.ohe_gt_stat_dyn_ground_label_bev_map = ohe_gt_stat_dyn_ground_label_bev_map
         self.dynamic_flow_is_non_rigid_flow = dynamic_flow_is_non_rigid_flow
-        self.overwrite_non_filled_pillars_with_default_flow = overwrite_non_filled_pillars_with_default_flow
-        self.overwrite_non_filled_pillars_with_default_logits = overwrite_non_filled_pillars_with_default_logits
-        # todo params in
-        self.artificial_network_output = ArtificialNetworkOutput()
+
+        assert type(artificial_network_config) == dict, "Wrong type for artificial_network_config"
+        self.artificial_network_output = ArtificialNetworkOutput(**artificial_network_config)
 
     def forward(self, network_output: Tensor,
-                    dynamicness_threshold,
-                    pc: Tensor,
-                    pointwise_voxel_coordinates_fs: Tensor,
-                    pointwise_valid_mask,
-                    filled_pillar_mask,
-                    odom,
-                    inv_odom,
-                    gt_flow_bev=None):
+                dynamicness_threshold,
+                pc: Tensor,
+                pointwise_voxel_coordinates_fs: Tensor,
+                pointwise_valid_mask,
+                filled_pillar_mask,
+                odom,
+                inv_odom,
+                gt_flow_bev=None,
+                ohe_gt_stat_dyn_ground_label_bev_map=None):
 
         """
         Args:
@@ -70,18 +68,18 @@ class OutputDecoder(pl.LightningModule):
             - pc: a tensor of shape [batch_size, num_points, 5 or 4] representing the point cloud input.
               Channels should be in order [x, y, z, feature1, feature2]
             - pointwise_voxel_coordinates_fs: a tensor of shape [batch_size, num_points, 2] representing the coordinates
-             of each point in the BEV grid
+              of each point in the BEV grid
             - pointwise_valid_mask: a tensor of shape [batch_size, num_points] representing whether each point is valid or not
             - filled_pillar_mask: a tensor of shape [batch_size, height, width] and type bool representing whether each pillar
-             in the BEV grid has been filled with points or not
+              in the BEV grid has been filled with points or not
             - inv_odom: a tensor of shape [batch_size, 4, 4] representing the inverse
-             of the ground truth transformation matrix
+              of the ground truth transformation matrix
 
              Below args are optional (default SLIM experiments with ground labels):
 
             - gt_flow_bev: a tensor of shape [batch_size, height, width, 2] representing the ground truth flow in the BEV grid
             - ohe_gt_stat_dyn_ground_label_bev_map: (optional) a tensor of shape [batch_size, height, width, 3] representing
-             the one-hot encoded ground truth labels for static/dynamic/ground objects in the BEV grid
+              the one-hot encoded ground truth labels for static/dynamic/ground objects in the BEV grid
 
         Returns:
             - pointwise_outputs
@@ -91,119 +89,25 @@ class OutputDecoder(pl.LightningModule):
 
         """
 
-        assert pointwise_voxel_coordinates_fs.shape[-1] == 2
-
-        (
-            modified_output_bev_img,
-            network_output_dict,
-            gt_flow_bev,
-            static_aggr_trafo,
-        ) = self.apply_output_modification(
-            network_output,
-            dynamicness_threshold,
-            pc=pc,
-            pointwise_voxel_coordinates_fs=pointwise_voxel_coordinates_fs,
-            pointwise_valid_mask=pointwise_valid_mask,
-            filled_pillar_mask=filled_pillar_mask,
-            inv_odom=inv_odom,
-            gt_flow_bev=gt_flow_bev,
-            ohe_gt_stat_dyn_ground_label_bev_map=self.ohe_gt_stat_dyn_ground_label_bev_map,
-            dynamic_flow_is_non_rigid_flow=self.dynamic_flow_is_non_rigid_flow,
-            overwrite_non_filled_pillars_with_default_flow=True,
-            overwrite_non_filled_pillars_with_default_logits=True
-        )
-
-
-        pointwise_output = self.apply_flow_to_points(
-            modified_output_bev_img=modified_output_bev_img,
-            pointwise_voxel_coordinates_fs=pointwise_voxel_coordinates_fs,
-            pointwise_valid_mask=pointwise_valid_mask,
-        )
-
-        return pointwise_output, static_aggr_trafo, dynamicness_threshold, modified_output_bev_img
-
-    def apply_output_modification(
-            self,
-            network_output,
-            dynamicness_threshold,
-            pc,
-            pointwise_voxel_coordinates_fs,
-            pointwise_valid_mask,
-            filled_pillar_mask,
-            inv_odom,
-            gt_flow_bev=None,
-            ohe_gt_stat_dyn_ground_label_bev_map=None,
-            dynamic_flow_is_non_rigid_flow=False,
-            overwrite_non_filled_pillars_with_default_flow=True,
-            overwrite_non_filled_pillars_with_default_logits=True):
-
-        flow_dim = 2
-        final_grid_size = network_output.shape[-2:]
-
         # Check the shapes and dimensions
         assert filled_pillar_mask.ndim == 4
         assert network_output.ndim == 4
-        assert filled_pillar_mask.shape[-2:] == network_output.shape[-2:], (filled_pillar_mask.shape, network_output.shape)
+        assert filled_pillar_mask.shape[-2:] == network_output.shape[-2:], (
+        filled_pillar_mask.shape, network_output.shape)
         assert pointwise_voxel_coordinates_fs.shape[-1] == 2
         # Check the correct dimensions of the output of the network
-        assert network_output.shape[1] == 4 + 2 * flow_dim + 1
+        assert network_output.shape[1] == 4 + 2 * self.flow_dim + 1
+        assert pointwise_voxel_coordinates_fs.shape[-1] == 2
 
-        # Partition the output by channels
-        network_output_dict = {}
-        if self.predict_weight_for_static_aggregation is not False:
-            network_output_dict["weight_logits_for_static_aggregation"] = network_output[:,-1]
-            network_output = network_output[:, :-1]
+        network_output_dict = self._create_output_dict(network_output)
+        homog_metric_voxel_center_coords, voxel_center_metric_coordinates = self._create_voxel_coords(network_output)
+        gt_static_flow = self._create_gt_static_flow(inv_odom, homog_metric_voxel_center_coords)
 
-        network_output_dict.update(
-            {
-                "disappearing_logit": network_output[:, 0:1],
-                "static_logit": network_output[:, 1:2],
-                "dynamic_logit": network_output[:, 2:3],
-                "ground_logit": network_output[:, 3:4],
-                "static_flow": network_output[:, 4: 4 + flow_dim],
-                "dynamic_flow": network_output[:, 4 + flow_dim: 4 + 2 * flow_dim],
-            }
-        )
-
-        # Creating of bev grid mesh
-        bev_extent = np.array([-35.0, -35.0, 35.0, 35.0])
-        net_output_shape = final_grid_size # Net out shape is [640, 640]
-        voxel_center_metric_coordinates = (
-                np.stack(
-                    np.meshgrid(np.arange(net_output_shape[0]), np.arange(net_output_shape[1]), indexing="ij"),
-                    axis=-1,
-                )
-                + 0.5
-        ) # now we have voxels in shape [640, 640, 2] from 0.5 to 639.5
-
-        voxel_center_metric_coordinates /= net_output_shape
-        voxel_center_metric_coordinates *= bev_extent[2:] - bev_extent[:2]
-        voxel_center_metric_coordinates += bev_extent[:2]
-        # now we have coordinates with centres of the voxel, for example in
-        # voxel_center_metric_coordinates[0, 0] is [-34.9453125, -34.9453125]
-        # The resolution (width of voxels) is 70m/640 = 0.1093..
-        homog_metric_voxel_center_coords = torch.tensor(np.concatenate(
-            [
-                voxel_center_metric_coordinates,
-                np.zeros_like(voxel_center_metric_coordinates[..., :1]),
-                np.ones_like(voxel_center_metric_coordinates[..., :1]),
-            ],
-            axis=-1,
-        ))
-        # homog_metric_voxel_center_coords only add z coord to 0 and 4th dimension for homogeneous coordinates
-
-        # gt_static_flow is (P_T_G - eye), which results in flow, shape
-        # TODO should be here inverse?
-        gt_static_flow = inv_odom - torch.eye(4, dtype=torch.float64)
-        gt_static_flow = torch.einsum("bij,hwj->bhwi", gt_static_flow,
-                                      homog_metric_voxel_center_coords)
-        # normalization of the 4th coordinates
-        gt_static_flow = gt_static_flow / gt_static_flow[..., -1].unsqueeze(-1)
-        # we take only xy coords
-        gt_static_flow = gt_static_flow[..., :2]
-        # Transform it to default order [BS, CH, H, W]
-        gt_static_flow = gt_static_flow.permute(0, 3, 1, 2)
-
+        # Forward pass of artificial network output, following steps are done:
+        # - Computed the source for logits and flow
+        # - Masked the non-filled pillars
+        # - Construct class probs from logits and decision of class is made based on dynamicness_threshold
+        # - Static aggregation flow is computed (Kabsch)
         network_output_dict, static_aggr_trafo, not_enough_points = self.artificial_network_output(
             network_output_dict=network_output_dict,
             dynamicness_threshold=dynamicness_threshold,
@@ -217,7 +121,7 @@ class OutputDecoder(pl.LightningModule):
             voxel_center_metric_coordinates=voxel_center_metric_coordinates,
         )
 
-        # Slicing the output
+        # Slicing the output from artificial_network_output
         disappearing_logit = network_output_dict["disappearing_logit"][:, 0]
         disappearing = torch.sigmoid(disappearing_logit)
         class_logits = network_output_dict["class_logits"]
@@ -235,7 +139,7 @@ class OutputDecoder(pl.LightningModule):
         masked_dynamic_aggr_flow = network_output_dict.get("masked_dynamic_aggr_flow", None)
         masked_static_aggr_flow = network_output_dict["masked_static_aggr_flow"]
 
-        if flow_dim == 2:
+        if self.flow_dim == 2:
             dynamic_flow = torch.cat([dynamic_flow, torch.zeros_like(dynamic_flow[:, :1])], dim=1)
             static_flow = torch.cat([static_flow, torch.zeros_like(static_flow[:, :1])], dim=1)
             static_aggr_flow = torch.cat([static_aggr_flow, torch.zeros_like(static_aggr_flow[:, :1])], dim=1)
@@ -255,7 +159,7 @@ class OutputDecoder(pl.LightningModule):
         assert len(is_static.shape) == 3
         assert len(groundness.shape) == 3
 
-        if dynamic_flow_is_non_rigid_flow:
+        if self.dynamic_flow_is_non_rigid_flow:
             aggregated_flow = torch.where(is_static[:, None],
                                           static_flow_for_aggr,
                                           (static_flow_for_aggr + dynamic_flow) * (1.0 - groundness[..., None]))
@@ -263,11 +167,9 @@ class OutputDecoder(pl.LightningModule):
             aggregated_flow = torch.where(is_static[:, None],
                                           static_flow_for_aggr,
                                           dynamic_flow * (1.0 - groundness[:, None]))
-        if (
-                self.use_dynamic_aggr_flow_for_aggr_flow
-                and dynamic_aggr_flow is not None
-                and "mask_has_dynamic_aggr_output" in network_output_dict.keys()
-        ):
+
+        if (self.use_dynamic_aggr_flow_for_aggr_flow and dynamic_aggr_flow is not None
+                and "mask_has_dynamic_aggr_output" in network_output_dict.keys()):
             aggregated_flow = torch.where(
                 network_output_dict["mask_has_dynamic_aggr_output"],
                 dynamic_aggr_flow,
@@ -292,39 +194,112 @@ class OutputDecoder(pl.LightningModule):
             'dynamic_aggr_flow': dynamic_aggr_flow,
         }
 
-        return (
-            modified_output_bev_img,
-            network_output_dict,
-            gt_flow_bev,
-            static_aggr_trafo,
+        # Transform pillars to pointcloud
+        pointwise_output = self._apply_flow_to_points(
+            modified_output_bev_img=modified_output_bev_img,
+            pointwise_voxel_coordinates_fs=pointwise_voxel_coordinates_fs,
+            pointwise_valid_mask=pointwise_valid_mask,
         )
 
+        return pointwise_output, static_aggr_trafo, dynamicness_threshold, modified_output_bev_img
 
-    def apply_flow_to_points(self, *,
-                             modified_output_bev_img,
-                             pointwise_voxel_coordinates_fs,
-                             pointwise_valid_mask):
+    def _create_output_dict(self, network_output):
+        """
+        Create the output dict, all decoder use it
+        """
+        # Partition the output by channels
+        network_output_dict = {}
+        if self.predict_weight_for_static_aggregation is not False:
+            network_output_dict["weight_logits_for_static_aggregation"] = network_output[:, -1]
+            network_output = network_output[:, :-1]
+
+        network_output_dict.update({
+            "disappearing_logit": network_output[:, 0:1],
+            "static_logit": network_output[:, 1:2],
+            "dynamic_logit": network_output[:, 2:3],
+            "ground_logit": network_output[:, 3:4],
+            "static_flow": network_output[:, 4: 4 + self.flow_dim],
+            "dynamic_flow": network_output[:, 4 + self.flow_dim: 4 + 2 * self.flow_dim]})
+
+        return network_output_dict
+
+    def _create_gt_static_flow(self, inv_odom, homog_metric_voxel_center_coords):
+        """
+        Compute other self supervise component -> gt_static_flow
+        """
+        # gt_static_flow is (P_T_G - eye), which results in flow, shape
+        # TODO should be here inverse?
+        print("UnCheck")
+        gt_static_flow = inv_odom - torch.eye(4, dtype=torch.float64)
+        gt_static_flow = torch.einsum("bij,hwj->bhwi", gt_static_flow,
+                                      homog_metric_voxel_center_coords)
+        # normalization of the 4th coordinates
+        gt_static_flow = gt_static_flow / gt_static_flow[..., -1].unsqueeze(-1)
+        # we take only xy coords
+        gt_static_flow = gt_static_flow[..., :2]
+        # Transform it to default order [BS, CH, H, W]
+        gt_static_flow = gt_static_flow.permute(0, 3, 1, 2)
+        return gt_static_flow
+
+    def _create_voxel_coords(self, network_output):
+        """
+        Creation of homog_metric_voxel_center_coords and voxel_center_metric_coordinates
+        """
+        final_grid_size = network_output.shape[-2:]
+
+        # Creating of bev grid mesh
+        bev_extent = np.array([-35.0, -35.0, 35.0, 35.0])
+        net_output_shape = final_grid_size  # Net out shape is [640, 640]
+        voxel_center_metric_coordinates = (
+                np.stack(
+                    np.meshgrid(np.arange(net_output_shape[0]), np.arange(net_output_shape[1]), indexing="ij"),
+                    axis=-1,
+                )
+                + 0.5
+        )  # now we have voxels in shape [640, 640, 2] from 0.5 to 639.5
+
+        voxel_center_metric_coordinates /= net_output_shape
+        voxel_center_metric_coordinates *= bev_extent[2:] - bev_extent[:2]
+        voxel_center_metric_coordinates += bev_extent[:2]
+        # now we have coordinates with centres of the voxel, for example in
+        # voxel_center_metric_coordinates[0, 0] is [-34.9453125, -34.9453125]
+        # The resolution (width of voxels) is 70m/640 = 0.1093..
+        homog_metric_voxel_center_coords = torch.tensor(np.concatenate(
+            [
+                voxel_center_metric_coordinates,
+                np.zeros_like(voxel_center_metric_coordinates[..., :1]),
+                np.ones_like(voxel_center_metric_coordinates[..., :1]),
+            ],
+            axis=-1,
+        ))
+        # homog_metric_voxel_center_coords only add z coord to 0 and 4th dimension for homogeneous coordinates
+        return homog_metric_voxel_center_coords, voxel_center_metric_coordinates
+
+    def _apply_flow_to_points(self, *,
+                              modified_output_bev_img,
+                              pointwise_voxel_coordinates_fs,
+                              pointwise_valid_mask):
 
         concat_bool_vals = torch.stack([modified_output_bev_img["is_static"],
                                         modified_output_bev_img["is_dynamic"],
-                                        modified_output_bev_img["is_ground"]], dim=1,)
+                                        modified_output_bev_img["is_ground"]], dim=1, )
 
         concat_flt_vals = torch.stack([modified_output_bev_img["disappearing"],
                                        modified_output_bev_img["disappearing_logit"],
                                        modified_output_bev_img["staticness"],
                                        modified_output_bev_img["dynamicness"],
-                                       modified_output_bev_img["groundness"]], dim=1,)
+                                       modified_output_bev_img["groundness"]], dim=1, )
         concat_flt_vals = torch.cat([concat_flt_vals,
-                                    modified_output_bev_img["class_probs"],
-                                    modified_output_bev_img["class_logits"],
-                                    modified_output_bev_img["dynamic_flow"],
-                                    modified_output_bev_img["static_flow"],
-                                    modified_output_bev_img["aggregated_flow"],
-                                    modified_output_bev_img["static_aggr_flow"]], dim=1)
+                                     modified_output_bev_img["class_probs"],
+                                     modified_output_bev_img["class_logits"],
+                                     modified_output_bev_img["dynamic_flow"],
+                                     modified_output_bev_img["static_flow"],
+                                     modified_output_bev_img["aggregated_flow"],
+                                     modified_output_bev_img["static_aggr_flow"]], dim=1)
 
         if modified_output_bev_img["dynamic_aggr_flow"] is not None:
             concat_flt_vals = torch.cat([concat_flt_vals,
-                                         modified_output_bev_img["dynamic_aggr_flow"]],dim=1)
+                                         modified_output_bev_img["dynamic_aggr_flow"]], dim=1)
             num_required_concat_vals = 26
         else:
             num_required_concat_vals = 23
@@ -338,13 +313,13 @@ class OutputDecoder(pl.LightningModule):
         pointwise_concat_bool_vals = concat_bool_vals[torch.arange(bs)[:, None], :, x, y]
         pointwise_concat_flt_vals = concat_flt_vals[torch.arange(bs)[:, None], :, x, y]
 
-
         pointwise_concat_bool_vals = torch.where(pointwise_valid_mask.unsqueeze(-1),
                                                  pointwise_concat_bool_vals,
                                                  torch.zeros_like(pointwise_concat_bool_vals))
         pointwise_concat_flt_vals = torch.where(pointwise_valid_mask.unsqueeze(-1),
                                                 pointwise_concat_flt_vals,
-                                                torch.tensor(float("nan"), dtype=torch.float32).repeat(*pointwise_concat_flt_vals.shape))
+                                                torch.tensor(float("nan"), dtype=torch.float32).repeat(
+                                                    *pointwise_concat_flt_vals.shape))
 
         assert pointwise_concat_bool_vals.shape[-1] == 3, pointwise_concat_bool_vals.shape
         pointwise_is_static = pointwise_concat_bool_vals[..., 0]
@@ -388,20 +363,15 @@ class OutputDecoder(pl.LightningModule):
 
 
 if __name__ == "__main__":
-
-    test_input = [torch.rand((1,9,640, 640)) for x in range(6)]
+    # for debug purposes
+    test_input = [torch.rand((1, 9, 640, 640)) for x in range(6)]
     model = OutputDecoder()
 
-    # todo transform
-    pointwise_voxel_coordinates_fs = torch.randint(0, 409600, (1, 95440, 2))
-
     prediction_fw = model(network_output=test_input[0],
-                dynamicness_threshold=0.5,
-                pc=torch.rand((1, 95440, 5)),
-                pointwise_voxel_coordinates_fs=torch.randint(0, 640, (1, 95440, 2)),
-                pointwise_valid_mask=torch.randint(0,2,(1,95440)).type(torch.bool),
-                filled_pillar_mask=torch.randint(0,2,(1,1,640,640)).type(torch.bool),
-                odom=torch.rand((1,4,4)),
-                inv_odom=torch.rand((1,4,4)))
-
-
+                          dynamicness_threshold=0.5,
+                          pc=torch.rand((1, 95440, 5)),
+                          pointwise_voxel_coordinates_fs=torch.randint(0, 640, (1, 95440, 2)),
+                          pointwise_valid_mask=torch.randint(0, 2, (1, 95440)).type(torch.bool),
+                          filled_pillar_mask=torch.randint(0, 2, (1, 1, 640, 640)).type(torch.bool),
+                          odom=torch.rand((1, 4, 4)),
+                          inv_odom=torch.rand((1, 4, 4)))
